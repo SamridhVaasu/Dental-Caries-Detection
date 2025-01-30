@@ -1,16 +1,9 @@
 import streamlit as st
 import numpy as np
 import torch
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from ultralytics import YOLO
 import time
-
-# Importing cv2 with error handling
-try:
-    import cv2
-except ImportError:
-    # If cv2 import fails, we'll use PIL for drawing
-    from PIL import ImageDraw, ImageFont
 
 # Page configuration
 st.set_page_config(
@@ -51,64 +44,36 @@ def detect_disease(model, image):
         st.error(f"Error during detection: {str(e)}")
         return None
 
-def draw_boxes_pil(image, results):
-    """Draw bounding boxes and labels using PIL instead of cv2"""
-    img = image.copy()
+def draw_boxes(image, results):
+    """Draw bounding boxes and labels on the image using PIL"""
+    # Convert PIL Image to RGB mode if it isn't already
+    img = image.convert('RGB')
     draw = ImageDraw.Draw(img)
-    colors = {
-        'cavity': '#FF0000',
-        'decay': '#00FF00',
-        'plaque': '#0000FF'
-    }
     
-    try:
-        # Attempt to load a font, fall back to default if not available
-        font = ImageFont.load_default()
-    except IOError:
-        font = None
+    # Define colors for different classes
+    colors = {
+        'cavity': "#FF0000",
+        'decay': "#00FF00",
+        'plaque': "#0000FF"
+    }
     
     for result in results:
         for box in result.boxes:
+            # Get box coordinates
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             confidence = float(box.conf[0])
             label = result.names[int(box.cls[0])]
-            color = colors.get(label.lower(), '#00FF00')
+            color = colors.get(label.lower(), "#00FF00")
             
             # Draw rectangle
             draw.rectangle([(x1, y1), (x2, y2)], outline=color, width=2)
             
             # Add text
             text = f'{label}: {confidence:.2f}'
-            text_bbox = draw.textbbox((x1, y1 - 20), text, font=font)
-            draw.rectangle([text_bbox[0], text_bbox[1], text_bbox[2], text_bbox[3]], fill=color)
-            draw.text((x1, y1 - 20), text, fill='white', font=font)
+            draw.rectangle([(x1, y1 - 20), (x1 + len(text) * 8, y1)], fill=color)
+            draw.text((x1, y1 - 20), text, fill="white")
     
     return img
-
-def draw_boxes(image, results):
-    """Draw bounding boxes and labels, using cv2 if available, otherwise PIL"""
-    if 'cv2' in globals():
-        # Use original cv2 implementation
-        img = np.array(image)
-        colors = {'cavity': (255, 0, 0), 'decay': (0, 255, 0), 'plaque': (0, 0, 255)}
-        
-        for result in results:
-            for box in result.boxes:
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                confidence = float(box.conf[0])
-                label = result.names[int(box.cls[0])]
-                color = colors.get(label.lower(), (0, 255, 0))
-                
-                cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
-                text = f'{label}: {confidence:.2f}'
-                (text_width, text_height), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                cv2.rectangle(img, (x1, y1 - text_height - 10), (x1 + text_width, y1), color, -1)
-                cv2.putText(img, text, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        
-        return Image.fromarray(img)
-    else:
-        # Use PIL implementation
-        return draw_boxes_pil(image, results)
 
 def main():
     # Sidebar
@@ -131,6 +96,7 @@ def main():
         st.error("Failed to load the model. Please check the model path and try again.")
         return
     
+    # File uploader with additional info
     uploaded_file = st.file_uploader(
         "Upload an image (JPG, PNG, JPEG)",
         type=["jpg", "png", "jpeg"],
@@ -151,6 +117,7 @@ def main():
                         output_image = draw_boxes(image, results)
                         process_time = time.time() - start_time
                         
+                        # Display results in a card-like container
                         st.markdown("""
                             <div style='background-color: #f8f9fa; padding: 1.5rem; 
                                         border-radius: 10px; margin: 1rem 0;'>
@@ -164,8 +131,10 @@ def main():
                         with col2:
                             st.image(output_image, caption="Detection Results", use_container_width=True)
                         
+                        # Display detection statistics
                         st.success(f"Processing completed in {process_time:.2f} seconds")
                         
+                        # Display detection summary
                         st.subheader("Detection Summary")
                         for result in results:
                             for box in result.boxes:
