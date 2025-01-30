@@ -151,7 +151,7 @@ def main():
     st.markdown("---")
     st.markdown("""
         <div style='text-align: center'>
-            <p>Developed by Your Organization Name | © 2024</p>
+            <p>Developed by IIoT Engineers | © 2025</p>
         </div>
         """, unsafe_allow_html=True)
 
