@@ -1,159 +1,125 @@
 import streamlit as st
-import numpy as np
 import torch
-from PIL import Image, ImageDraw, ImageFont
-from ultralytics import YOLO
-import time
+from PIL import Image
+import numpy as np
+import cv2
+import io
+import os
 
-# Page configuration
+# Set page configuration
 st.set_page_config(
-    page_title="Dental Disease Detection System",
+    page_title="Dental Caries Detection",
     page_icon="🦷",
     layout="wide"
 )
 
-# Custom CSS for better styling
+# Custom CSS to improve app appearance
 st.markdown("""
     <style>
-    .main {
-        padding: 2rem;
-    }
-    .stAlert {
-        padding: 1rem;
-        margin: 1rem 0;
-    }
+        .stApp {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .uploadedFile {
+            margin-bottom: 2rem;
+        }
+        .prediction-text {
+            font-size: 1.2rem;
+            margin-top: 1rem;
+        }
     </style>
-    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-@st.cache_resource
-def load_model(model_path):
-    """Load and cache the YOLO model"""
+def load_model():
+    """Load the YOLOv5 model"""
     try:
-        model = YOLO(model_path)
+        model = torch.hub.load('ultralytics/yolov5', 'custom', path='best.pt')
+        model.conf = 0.5  # Set confidence threshold
         return model
     except Exception as e:
         st.error(f"Error loading model: {str(e)}")
         return None
 
-def detect_disease(model, image):
-    """Perform disease detection on the image"""
+def process_image(image, model):
+    """Process the image and return predictions"""
     try:
+        # Convert PIL image to RGB
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+        
+        # Make prediction
         results = model(image)
-        return results
+        
+        # Convert results to DataFrame
+        pred_df = results.pandas().xyxy[0]
+        
+        # Draw boxes on image
+        img_array = np.array(image)
+        for idx, row in pred_df.iterrows():
+            x1, y1, x2, y2 = int(row['xmin']), int(row['ymin']), int(row['xmax']), int(row['ymax'])
+            cv2.rectangle(img_array, (x1, y1), (x2, y2), (255, 0, 0), 2)
+            cv2.putText(img_array, f"{row['name']} {row['confidence']:.2f}", 
+                       (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
+        
+        return Image.fromarray(img_array), pred_df
     except Exception as e:
-        st.error(f"Error during detection: {str(e)}")
-        return None
-
-def draw_boxes(image, results):
-    """Draw bounding boxes and labels on the image using PIL"""
-    # Convert PIL Image to RGB mode if it isn't already
-    img = image.convert('RGB')
-    draw = ImageDraw.Draw(img)
-    
-    # Define colors for different classes
-    colors = {
-        'cavity': "#FF0000",
-        'decay': "#00FF00",
-        'plaque': "#0000FF"
-    }
-    
-    for result in results:
-        for box in result.boxes:
-            # Get box coordinates
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
-            confidence = float(box.conf[0])
-            label = result.names[int(box.cls[0])]
-            color = colors.get(label.lower(), "#00FF00")
-            
-            # Draw rectangle
-            draw.rectangle([(x1, y1), (x2, y2)], outline=color, width=2)
-            
-            # Add text
-            text = f'{label}: {confidence:.2f}'
-            draw.rectangle([(x1, y1 - 20), (x1 + len(text) * 8, y1)], fill=color)
-            draw.text((x1, y1 - 20), text, fill="white")
-    
-    return img
+        st.error(f"Error processing image: {str(e)}")
+        return None, None
 
 def main():
-    # Sidebar
-    st.sidebar.image("iiotengineers_logo.png", use_container_width=True)
-    st.sidebar.title("Settings")
-    confidence_threshold = st.sidebar.slider("Confidence Threshold", 0.0, 1.0, 0.5, 0.05)
-    
-    # Main content
-    st.title("🦷 Dental Disease Detection System")
+    # App title and description
+    st.title("🦷 Dental Caries Detection System")
     st.markdown("""
-    This system uses advanced AI to detect dental diseases in images.
-    Upload a clear image of teeth for analysis.
+        This application uses AI to detect dental caries in dental X-ray images.
+        Upload an image to get started.
     """)
     
     # Load model
-    model_path = "best.pt"
-    model = load_model(model_path)
+    model = load_model()
     
     if model is None:
-        st.error("Failed to load the model. Please check the model path and try again.")
+        st.error("Failed to load model. Please ensure 'best.pt' is in the correct location.")
         return
     
-    # File uploader with additional info
-    uploaded_file = st.file_uploader(
-        "Upload an image (JPG, PNG, JPEG)",
-        type=["jpg", "png", "jpeg"],
-        help="Please ensure the image is clear and well-lit for best results."
-    )
+    # File uploader
+    uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
     
     if uploaded_file is not None:
-        try:
-            image = Image.open(uploaded_file)
-            st.image(image, caption="Uploaded Image", use_container_width=True)
-            
-            if st.button("Detect Diseases", type="primary"):
-                with st.spinner("🔍 Analyzing image..."):
-                    start_time = time.time()
-                    results = detect_disease(model, image)
-                    
-                    if results is not None:
-                        output_image = draw_boxes(image, results)
-                        process_time = time.time() - start_time
-                        
-                        # Display results in a card-like container
-                        st.markdown("""
-                            <div style='background-color: #f8f9fa; padding: 1.5rem; 
-                                        border-radius: 10px; margin: 1rem 0;'>
-                                <h3 style='color: #2C3E50; margin-bottom: 1rem;'>Detection Results</h3>
-                            </div>
-                        """, unsafe_allow_html=True)
-                        
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.image(image, caption="Original Image", use_container_width=True)
-                        with col2:
-                            st.image(output_image, caption="Detection Results", use_container_width=True)
-                        
-                        # Display detection statistics
-                        st.success(f"Processing completed in {process_time:.2f} seconds")
-                        
-                        # Display detection summary
-                        st.subheader("Detection Summary")
-                        for result in results:
-                            for box in result.boxes:
-                                label = result.names[int(box.cls[0])]
-                                confidence = float(box.conf[0])
-                                if confidence >= confidence_threshold:
-                                    st.info(f"Detected {label} with {confidence:.2%} confidence")
+        # Display original image
+        col1, col2 = st.columns(2)
         
-        except Exception as e:
-            st.error(f"Error processing image: {str(e)}")
-            st.info("Please try uploading a different image")
-    
-    # Add footer
-    st.markdown("---")
-    st.markdown("""
-        <div style='text-align: center'>
-            <p>Developed by Your Organization Name | © 2024</p>
-        </div>
-        """, unsafe_allow_html=True)
+        with col1:
+            st.subheader("Original Image")
+            image = Image.open(uploaded_file)
+            st.image(image, caption="Uploaded Image", use_column_width=True)
+        
+        # Process image and display results
+        with col2:
+            st.subheader("Detected Caries")
+            processed_image, predictions = process_image(image, model)
+            
+            if processed_image is not None:
+                st.image(processed_image, caption="Processed Image", use_column_width=True)
+                
+                if not predictions.empty:
+                    st.markdown("### Detection Results")
+                    st.markdown("The following caries were detected:")
+                    for idx, row in predictions.iterrows():
+                        st.markdown(f"- Caries detected with {row['confidence']:.2f} confidence")
+                else:
+                    st.info("No caries detected in the image.")
+            
+            # Add download button for processed image
+            if processed_image is not None:
+                # Convert processed image to bytes
+                buf = io.BytesIO()
+                processed_image.save(buf, format="PNG")
+                btn = st.download_button(
+                    label="Download Processed Image",
+                    data=buf.getvalue(),
+                    file_name="processed_image.png",
+                    mime="image/png"
+                )
 
 if __name__ == "__main__":
     main()
